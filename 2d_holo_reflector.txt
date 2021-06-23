@@ -1,0 +1,279 @@
+--@name 2D Holo Reflector
+--@author Dr.Terr
+--@server
+--@include ./lib/2d_intercept0.2.txt
+
+local intercept = require("./lib/2d_intercept0.2.txt")
+
+local makeLineMidPosLenAng = intercept.makeLineMidPosLenAng
+
+local function makeHolo(pos,color)
+    if pos == nil then
+        pos = Vector()
+    end
+    local holo = holograms.create(pos, Angle(), "models/holograms/cube.mdl", Vector(0.2))
+    if color then
+        holo:setColor(color)
+    end
+    return holo
+end
+
+local refUp = Vector(0,0,1)
+
+local function makeTraceHolo(color)
+    local cubeSize = 11.9
+    local holo = holograms.create(Vector(0),Angle(0),"models/holograms/cube.mdl",Vector(0))
+    if color then
+        holo:setColor(color)
+    end
+    return function(from,to)
+        local norm = from-to
+        local midPoint = (from+to)/2
+        local len = norm:getLength()
+        norm:normalize()
+        local orientation = norm:getQuaternion(refUp)
+
+
+        holo:setScale(Vector(len/cubeSize,0.1,0.1))
+        holo:setAngles(orientation:getEulerAngle())
+        holo:setPos(midPoint)
+    end
+end
+
+
+
+local origin = chip():getPos()+Vector(0,0,10)
+
+local function makeSpinLine(offset,length,turnSpeed)
+    local angle = 0
+    return function()
+        local from,to = makeLineMidPosLenAng(offset,length,angle)
+        angle = angle + turnSpeed
+        return from,to
+    end
+end
+
+--Simple test of 2 infinite rays
+local function allocateRaysTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(0,255,0))
+    local spinner = makeSpinLine(Vector(50,60),20,1/4)
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        local intercept = intercept.rays(tracerPos,tracerDir,from,from-to)
+        if intercept then
+            interceptHolo:setPos(intercept+offset)
+        end
+    end
+end
+
+--Simple test of 2 infinite rays and sideness
+local function allocateRaysSidedTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(128,128,0))
+    local spinner = makeSpinLine(Vector(-50,60),20,-1/4)
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        local intercept = intercept.raysSided(from,(from-to):getNormalized(),tracerPos,tracerDir)
+        if intercept then
+            lineTracer(from+offset,intercept+offset)
+            interceptHolo:setPos(intercept+offset)
+        else
+            lineTracer(from+offset,to+offset)
+        end
+    end
+end
+
+--Simple test of 2 infinite rays and bidirectional sideness
+local function allocateRaysBiSidedTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(128,0,240))
+    local spinner = makeSpinLine(Vector(20,80),20,-1/4)
+    local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        originHolo:setPos(from+offset)
+        local intercept = intercept.raysBiSided(from,(from-to):getNormalized(),tracerPos,tracerDir)
+        if intercept then
+            lineTracer(from+offset,intercept+offset)
+            interceptHolo:setPos(intercept+offset)
+        else
+            lineTracer(from+offset,to+offset)
+        end
+    end
+end
+
+--Test a ray intercepting a line
+local function allocateLineTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(255,255,0))
+    local spinner = makeSpinLine(Vector(40,-60),40,-1/2)
+    --local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        --originHolo:setPos(from+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept = intercept.interceptLineWithRay(from,to,tracerPos,tracerDir)
+        if intercept then
+            interceptHolo:setPos(intercept+offset)
+        end
+    end
+end
+
+--Test a ray intercepting a line and returning a lerp value
+local function allocateLineLerpTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(255,128,0))
+    local spinner = makeSpinLine(Vector(-60,-60),80,1/2)
+    local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        originHolo:setPos(from+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept,lerp = intercept.interceptLineWithRayForLerp(from,to,tracerPos,tracerDir)
+        if intercept then
+            interceptHolo:setPos(intercept+offset)
+            interceptHolo:setColor(Color(255*lerp,0,0))
+        end
+    end
+end
+
+--Test a ray intercepting a line and returning a reflected vector
+local function allocateLineBounceTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(0,255,128))
+    local bounceTracer = makeTraceHolo(Color(0,255,0))
+    local normalTracer = makeTraceHolo(Color(0,0,255))
+    local spinner = makeSpinLine(Vector(120,-120),180,-1/3)
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept,bounce = intercept.interceptLineWithRayForBounce(from,to,tracerPos,tracerDir)
+        if intercept then
+            bounceTracer(intercept+offset,intercept+offset+bounce*20)
+            interceptHolo:setPos(intercept+offset)
+        end
+    end
+end
+
+--Test a ray intercepting a line and returning a reflected vector, lerp and normal
+local function allocateLineBounceAndNormalTest(offset)
+    local interceptHolo = makeHolo(nil)
+    local lineTracer = makeTraceHolo(Color(0,255,255))
+    local bounceTracer = makeTraceHolo(Color(0,255,0))
+    local normalTracer = makeTraceHolo(Color(0,0,255))
+    local spinner = makeSpinLine(Vector(0,-120),180,1/4)
+    local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        originHolo:setPos(from+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept,bounce,lerp,normal = intercept.interceptLineWithRayForBounceLerpNormal(from,to,tracerPos,tracerDir)
+        if intercept then
+            bounceTracer(intercept+offset,intercept+offset+bounce*20)
+            normalTracer(intercept+offset,intercept+offset+normal*10)
+            interceptHolo:setPos(intercept+offset)
+            interceptHolo:setColor(Color(255*lerp,0,0))
+        end
+    end
+end
+
+--Test two lines intersecting
+local function allocateLinesTest(offset)
+    local interceptHolo = makeHolo(nil,Color(255,0,0))
+    local lineTracer = makeTraceHolo(Color(255,128,128))
+    local spinner = makeSpinLine(Vector(20,0),40,-1/2)
+    --local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        --originHolo:setPos(from+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept = intercept.interceptLines(from,to,tracerPos,tracerPos+tracerDir*60)
+        if intercept then
+            interceptHolo:setPos(intercept+offset)
+        end
+    end
+end
+
+--Test two lines intersecting and returning reflected vector, lerp and normal
+local function allocateLinesBounceTest(offset)
+    local interceptHolo = makeHolo(nil)
+    local lineTracer = makeTraceHolo(Color(255,0,255))
+    local bounceTracer = makeTraceHolo(Color(0,255,0))
+    local normalTracer = makeTraceHolo(Color(0,0,255))
+    local spinner = makeSpinLine(Vector(-20,0),40,1/4)
+    local originHolo = makeHolo(Vector(20,80))
+    return function(tracerPos,tracerDir)
+        local from,to = spinner()
+        lineTracer(from+offset,to+offset)
+        originHolo:setPos(from+offset)
+        lineTracer(from+offset,to+offset)
+        local intercept,bounce,lerp,normal = intercept.interceptLinesForBounceLerpNormal(from,to,tracerPos,tracerPos+tracerDir*60)
+        if intercept then
+            bounceTracer(intercept+offset,intercept+offset+bounce*20)
+            normalTracer(intercept+offset,intercept+offset+normal*10)
+            interceptHolo:setPos(intercept+offset)
+            interceptHolo:setColor(Color(255*lerp,0,0))
+        end
+    end
+end
+
+local tracerOffset = Vector(10,10,0)
+local tracerAngle = 0
+
+local rotationPerTick = 90/190
+
+--A collectiion of all tests, comment out the ones you not interested in
+local testsArrayToAllocate = {
+    allocateRaysTest,
+    allocateRaysSidedTest,
+    allocateRaysBiSidedTest,
+    allocateLineTest,
+    allocateLineLerpTest,
+    allocateLineBounceTest,
+    allocateLineBounceAndNormalTest,
+    allocateLinesTest,
+    allocateLinesBounceTest
+}
+
+local allocatedTests = {}
+
+for i,test in ipairs(testsArrayToAllocate) do
+    allocatedTests[i] = test(origin)
+end
+
+local rayLine = makeTraceHolo(Color(0,0,255))
+
+local rayPosHolo = makeHolo(origin+tracerOffset)
+
+local function tickMe()
+    
+    tracerAngle = tracerAngle + rotationPerTick
+    
+    
+    local tracerRad = math.rad(tracerAngle)
+    local dirX = math.sin(tracerRad)
+    local dirY = math.cos(tracerRad)
+    
+    local dirVec = Vector(dirX,dirY,0)
+    
+    local tracerPos = tracerOffset+origin
+    rayLine(tracerPos,tracerPos+dirVec*40)
+
+    
+    for i,test in pairs(allocatedTests) do
+        test(tracerOffset,dirVec)
+    end
+    
+end
+
+hook.add("think","Trace Holos",tickMe)
+--timer.create("",0.2,0,tickMe)

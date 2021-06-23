@@ -1,0 +1,503 @@
+--@name 2D Intercept Lib 0.2
+--@author Dr.Terr
+
+--[[
+    Glossary
+    Ray - An infinite line with a defined offset and a direction
+    Line - In most cases a collection of 2 points, defining from and to component
+    Dot Product - A scalar value representing how parallel vectors/directions are generally 
+goes from -1 to 1, 0 being perpendicular and 1 or -1 being perfectly parallel -1 being in the opposite direction. 
+Value is much higher if provided vectors aren't normalized, but will result in 0 if both lines are still perpendicular.
+	Lerp - Linear Interpolation, generally refers to positioning point between 2 vectors using a ratio position value from 0 to 1
+In this library, some functions return what the lerp value would be on the line and refer to that value as lerp.
+]]
+
+--This called in-lining, it speeds up access to functions
+local min = math.min
+local max = math.max
+local sqrt = math.sqrt
+
+--Calculates a dot product quickly
+local function dotFast(aX,aY,bX,bY)
+    return aX*bX+aY*bY
+end
+
+--Provides a right side(relative) facing normal for a from->to line
+local function makeLineNormal(from,to)
+    local diff = from-to
+    diff:normalize()
+    return Vector(-diff.y,diff.x)
+end
+
+
+local function reflectVec(dir,normal)
+    return dir-2*(normal:dot(dir)*normal)
+end
+
+--Takes x,y components individually and returns x,y separately
+local function reflectComponents(dirX,dirY,normalX,normalY)
+    local baseDot = dirX*normalX+dirY*normalY
+    local reflectionX = dirX-baseDot*normalX*2
+    local reflectionY = dirY-baseDot*normalY*2
+    return reflectionX,reflectionY
+end
+
+--Reflects against normal as expected even if normal facing wrong way
+local function reflectAccurrateVec(dir,normal)
+    local refX,refY = reflectAccurate(dir.x,dir.y,normal.x,normal.y)
+    return Vector(refX,refY)
+end
+
+--Uses Elimination Method for finding intersection
+--See: https://iq.opengenus.org/2d-line-intersection/ for basis for this algorithm
+--A very efficient algorithm for finding points reliably on intersecting rays
+local function interceptRaysComponents(aX,aY,bX,bY,cX,cY,dX,dY)
+    --Shift components to "origins"
+    local abX = aX-bX
+    local cdX = cX-dX
+
+    local abY = aY-bY
+    local cdY = cY-dY
+    local slope = abX*cdY - abY * cdX
+    if slope == 0 then
+        return
+    end
+    local xSlope = aX * bY - bX * aY
+    local ySlope = cX * dY - dX * cY
+    return (xSlope * cdX - ySlope * abX) / slope,(xSlope * cdY - ySlope * abY) / slope
+end
+
+--Intercepts two rays, which go through from-to vectors referred as line and trace
+local function intercept(lineFrom,lineTo,traceFrom,traceTo)
+    local x,y = interceptRaysComponents(lineFrom.x,lineFrom.y,lineTo.x,lineTo.y,traceFrom.x,tracePos.y,traceTo.x,traceTo.y)
+    if x != nil then
+        return Vector(x,y)
+    end
+end
+
+--A simple two ray intercept, expects a ray offset and a direction
+local function interceptRays(linePos,lineDir,tracePos,traceDir)
+    local linePosX = linePos.x
+    local linePosY = linePos.y
+    local tracePosX  = tracePos.x
+    local tracePosY = tracePos.y
+    local x,y = interceptRaysComponents(linePosX,linePosY,linePosX+lineDir.x,linePosY+lineDir.y,tracePosX,tracePosY,tracePosX+traceDir.x,tracePosY+traceDir.y)
+    if x != nil then
+        return Vector(x,y)
+    end
+end
+
+--Ensures that trace ray faces intercept point
+local function interceptRaysSided(linePos,lineDir,tracePos,traceDir)
+    local linePosX = linePos.x
+    local linePosY = linePos.y
+    local tracePosX = tracePos.x
+    local tracePosY = tracePos.y
+    local traceDirX = traceDir.x
+    local traceDirY = traceDir.y
+    
+    local x,y = interceptRaysComponents(linePosX,linePosY,linePosX+lineDir.x,linePosY+lineDir.y,tracePosX,tracePosY,tracePosX+traceDirX,tracePosY+traceDirY)
+    if x != nil then
+        local interceptDirX = x-tracePosX
+        local interceptDirY = y-tracePosY
+        
+        --Check if we traced it behind or in front of ray start, by doing this dot product
+        --local dot = interceptDirX*traceDirX+interceptDirY*traceDirY
+        if interceptDirX*traceDirX+interceptDirY*traceDirY > 0 then
+            return Vector(x,y)
+        end
+    end
+end
+
+--Ensures that both rays face intercept point
+local function interceptRaysBiSided(linePos,lineDir,tracePos,traceDir)
+    local linePosX = linePos.x
+    local linePosY = linePos.y
+    
+    local lineDirX = lineDir.x
+    local lineDirY = lineDir.y
+    
+    local tracePosX  = tracePos.x
+    local tracePosY = tracePos.y
+    
+    local traceDirX = traceDir.x
+    local traceDirY = traceDir.y
+    
+    local x,y = interceptRaysComponents(linePosX,linePosY,linePosX+lineDirX,linePosY+lineDirY,tracePosX,tracePosY,tracePosX+traceDirX,tracePosY+traceDirY)
+    if x != nil then
+        --Normal for dot product for trace
+        local interceptDirX = x-tracePosX
+        local interceptDirY = y-tracePosY
+    
+        --Check if we traced it behind or in front of ray start, by doing this dot product
+        --local dot = interceptDirX*rayDirX+interceptDirY*rayDirY
+        if interceptDirX*traceDirX+interceptDirY*traceDirY > 0 then
+            --Normal for dot product for line
+            local interceptDirX = x-linePosX
+            local interceptDirY = y-linePosY
+            --local dot = interceptDirX*lineDiirX+interceptDirY*lineDirY
+            if interceptDirX*lineDirX+interceptDirY*lineDirY < 0 then
+                return Vector(x,y)
+            end
+        end
+    end
+end
+
+--For a line from-to, check if ray is intercepting with it always sided
+local function interceptLineWithRay(lineFrom,lineTo,rayStart,rayDir)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local rayStartX = rayStart.x
+    local rayStartY = rayStart.y
+    local rayDirX = rayDir.x
+    local rayDirY = rayDir.y
+    
+    --Get intercept point for projected lines
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,rayStartX,rayStartY,rayStartX+rayDirX,rayStartY+rayDirY)
+    if x != nil then
+        local interceptDirX = x-rayStartX
+        local interceptDirY = y-rayStartY
+    
+        --Check if we traced it behind or in front of ray start, by doing this dot product
+        if interceptDirX*rayDirX+interceptDirY*rayDirY > 0 then
+            
+            --Check if intercept inside a bounding box of the line
+            local lineMinX = min(lineFromX,lineToX)
+            local lineMinY = min(lineFromY,lineToY)
+            
+            local lineMaxX = max(lineFromX,lineToX)
+            local lineMaxY = max(lineFromY,lineToY)
+            if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+                return Vector(x,y)
+            end 
+        end
+    end
+end
+
+--Returns additional ratio of where ray intersected a line as a ratio position from lineFrom and lineTo
+local function interceptLineWithRayForLerp(lineFrom,lineTo,rayStart,rayDir)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local rayStartX = rayStart.x
+    local rayStartY = rayStart.y
+    local rayDirX = rayDir.x
+    local rayDirY = rayDir.y
+    
+    --Get intercept point for projected lines
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,rayStartX,rayStartY,rayStartX+rayDirX,rayStartY+rayDirY)
+    if x != nil then
+        local interceptDirX = x-rayStartX
+        local interceptDirY = y-rayStartY
+    
+        --Check if we traced it behind or in front of ray staart, by doing this dot product
+        local dot = interceptDirX*rayDirX+interceptDirY*rayDirY
+        if dot > 0 then
+            
+            --Check if intercept inside a bounding box of the line
+            local lineMinX = min(lineFromX,lineToX)
+            local lineMinY = min(lineFromY,lineToY)
+            
+            local lineMaxX = max(lineFromX,lineToX)
+            local lineMaxY = max(lineFromY,lineToY)
+            
+            if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+                --Handles  returning a ratio
+                local lineDiffX = lineFromX-lineToX
+                local lineDiffY = lineFromY-lineToY
+                
+                local fromDiffX = x-lineFromX
+                local fromDiffY = y-lineFromY
+                --It is faster to do a x*x to represent x^2
+                local lineLength = sqrt(lineDiffX*lineDiffX+lineDiffY*lineDiffY)
+                local fromLength = sqrt(fromDiffX*fromDiffX+fromDiffY*fromDiffY)
+                
+                return Vector(x,y),fromLength/lineLength,fromLength
+            end 
+        end
+    end
+end
+
+--Returns a intercept position and a bounce direction
+local function interceptLineWithRayForBounce(lineFrom,lineTo,rayStart,rayDir)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local rayStartX = rayStart.x
+    local rayStartY = rayStart.y
+    local rayDirX = rayDir.x
+    local rayDirY = rayDir.y
+    
+    --Get intercept point for projected lines
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,rayStartX,rayStartY,rayStartX+rayDirX,rayStartY+rayDirY)
+    if x != nil then
+        local interceptDirX = x-rayStartX
+        local interceptDirY = y-rayStartY
+    
+        --Check if we traced it behind or in front of ray start, by doing this dot product
+        if interceptDirX*rayDirX+interceptDirY*rayDirY > 0 then
+            
+            --Check if intercept inside a bounding box of the line
+            local lineMinX = min(lineFromX,lineToX)
+            local lineMinY = min(lineFromY,lineToY)
+            
+            local lineMaxX = max(lineFromX,lineToX)
+            local lineMaxY = max(lineFromY,lineToY)
+            
+            if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+                --Components for normal
+                local lineDiffX = lineFromX-lineToX
+                local lineDiffY = lineFromY-lineToY
+                
+                --It is faster to do a x*x to represent x^2
+                local lineLength = sqrt(lineDiffX*lineDiffX+lineDiffY*lineDiffY)
+                
+                --A normalized x,y right side of the line
+                local normalX = -lineDiffY/lineLength
+                local normalY = lineDiffX/lineLength
+                
+                local reflectDot = rayDirX*normalX+rayDirY*normalY
+                local reflectionX = rayDirX-reflectDot*normalX*2
+                local reflectionY = rayDirY-reflectDot*normalY*2
+                
+                return Vector(x,y),Vector(reflectionX,reflectionY)
+            end 
+        end
+    end
+end
+
+--Returns bounce vector, lerp, normal and magnitude of difference from lineFrom position to intercept point
+local function interceptLineWithRayForBounceLerpNormal(lineFrom,lineTo,rayStart,rayDir)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local rayStartX = rayStart.x
+    local rayStartY = rayStart.y
+    local rayDirX = rayDir.x
+    local rayDirY = rayDir.y
+    
+    --Get intercept point for projected lines
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,rayStartX,rayStartY,rayStartX+rayDirX,rayStartY+rayDirY)
+    if x != nil then
+        local interceptDirX = x-rayStartX
+        local interceptDirY = y-rayStartY
+    
+        --Check if we traced it behind or in front of ray start, by doing this dot product
+        if interceptDirX*rayDirX+interceptDirY*rayDirY > 0 then
+            
+            --Check if intercept inside a bounding box of the line
+            local lineMinX = min(lineFromX,lineToX)
+            local lineMinY = min(lineFromY,lineToY)
+            
+            local lineMaxX = max(lineFromX,lineToX)
+            local lineMaxY = max(lineFromY,lineToY)
+            
+            if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+            
+                local lineDiffX = lineFromX-lineToX
+                local lineDiffY = lineFromY-lineToY
+                
+                local fromDiffX = x-lineFromX
+                local fromDiffY = y-lineFromY
+                
+                --It is faster to do a x*x to represent x^2
+                local lineLength = sqrt(lineDiffX*lineDiffX+lineDiffY*lineDiffY)
+                local fromLength = sqrt(fromDiffX*fromDiffX+fromDiffY*fromDiffY)
+                
+                --A normalized x,y right side of the line
+                local normalX = -lineDiffY/lineLength
+                local normalY = lineDiffX/lineLength
+                
+                local reflectDot = rayDirX*normalX+rayDirY*normalY
+                
+                
+                local reflectionX = rayDirX-reflectDot*normalX*2
+                local reflectionY = rayDirY-reflectDot*normalY*2
+        
+                --Correct normal for return
+                if reflectDot > 0 then
+                    normalX = -normalX
+                    normalY = -normalY
+                end
+                
+                return Vector(x,y),Vector(reflectionX,reflectionY),fromLength/lineLength,Vector(normalX,normalY),fromLength
+            end 
+        end
+    end
+end
+
+--For 2 lines check if they intersect
+local function interceptLines(lineFrom,lineTo,tracerFrom,tracerTo)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local tracerFromX = tracerFrom.x
+    local tracerFromY = tracerFrom.y
+    local tracerToX = tracerTo.x
+    local tracerToY = tracerTo.y
+    
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,tracerFromX,tracerFromY,tracerToX,tracerToY)
+    
+    if x != nil then
+        --Check if intercept inside a bounding box of the line
+        local lineMinX = min(lineFromX,lineToX)
+        local lineMinY = min(lineFromY,lineToY)
+            
+        local lineMaxX = max(lineFromX,lineToX)
+        local lineMaxY = max(lineFromY,lineToY)
+        
+        if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+            local traceMinX = min(tracerFromX,tracerToX)
+            local traceMinY = min(tracerFromY,tracerToY)
+            
+            local traceMaxX = max(tracerFromX,tracerToX)
+            local traceMaxY = max(tracerFromY,tracerToY)
+            
+            if traceMinX <= x and traceMaxX >= x and traceMinY <= y and traceMaxY >= y then
+                return Vector(x,y)
+            end
+        end
+    end
+end
+
+local function interceptLinesForBounceLerpNormal(lineFrom,lineTo,tracerFrom,tracerTo)
+    --Doing this is speeds up access
+    --Taking variables from objects takes longer then using local variables
+    local lineFromX = lineFrom.x
+    local lineFromY = lineFrom.y
+    local lineToX = lineTo.x
+    local lineToY = lineTo.y
+    
+    local tracerFromX = tracerFrom.x
+    local tracerFromY = tracerFrom.y
+    local tracerToX = tracerTo.x
+    local tracerToY = tracerTo.y
+    
+    local x,y = interceptRaysComponents(lineFromX,lineFromY,lineToX,lineToY,tracerFromX,tracerFromY,tracerToX,tracerToY)
+    
+    if x != nil then
+        --Check if intercept inside a bounding box of the line
+        local lineMinX = min(lineFromX,lineToX)
+        local lineMinY = min(lineFromY,lineToY)
+            
+        local lineMaxX = max(lineFromX,lineToX)
+        local lineMaxY = max(lineFromY,lineToY)
+        
+        if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+            local traceMinX = min(tracerFromX,tracerToX)
+            local traceMinY = min(tracerFromY,tracerToY)
+            
+            local traceMaxX = max(tracerFromX,tracerToX)
+            local traceMaxY = max(tracerFromY,tracerToY)
+            
+            if traceMinX <= x and traceMaxX >= x and traceMinY <= y and traceMaxY >= y then
+                
+                local lineDiffX = lineFromX-lineToX
+                local lineDiffY = lineFromY-lineToY
+                
+                local tracerDiffX = tracerToX-tracerFromX
+                local tracerDiffY = tracerToY-tracerFromY
+                
+                local tracerLength = sqrt(tracerDiffX*tracerDiffX+tracerDiffY*tracerDiffY)
+                
+                local rayDirX = tracerDiffX/tracerLength
+                local rayDirY = tracerDiffY/tracerLength
+                
+                local fromDiffX = x-lineFromX
+                local fromDiffY = y-lineFromY
+                
+                --It is faster to do a x*x to represent x^2
+                local lineLength = sqrt(lineDiffX*lineDiffX+lineDiffY*lineDiffY)
+                local fromLength = sqrt(fromDiffX*fromDiffX+fromDiffY*fromDiffY)
+                
+                --A normalized x,y right side of the line
+                local normalX = -lineDiffY/lineLength
+                local normalY = lineDiffX/lineLength
+                
+                local reflectDot = rayDirX*normalX+rayDirY*normalY
+                
+                
+                local reflectionX = rayDirX-reflectDot*normalX*2
+                local reflectionY = rayDirY-reflectDot*normalY*2
+        
+                --Correct normal for return
+                if reflectDot > 0 then
+                    normalX = -normalX
+                    normalY = -normalY
+                end
+                
+                return Vector(x,y),Vector(reflectionX,reflectionY),fromLength/lineLength,Vector(normalX,normalY),fromLength
+            end
+        end
+    end
+end
+
+--A helper function. Angle in degrees
+local function makeLineMidPosLenAng(pos,len,angle)
+    local dirX = math.sin(math.rad(angle))
+    local dirY = math.cos(math.rad(angle))
+    len = len/2
+    local diffVector = Vector(dirX*len,dirY*len)
+    return pos+diffVector,pos-diffVector
+end
+
+--L = Lerp, B = Bounce, M = Magnitude, N = Normal
+
+--Provide a full name and a shortcut names
+return {
+    dot = dotFast,
+    reflectVec = reflectVec,
+    intercept = intercept,
+    
+    interceptRays = interceptRays,
+    rays = interceptRays,
+    
+    interceptRaysSided =  interceptRaysSided,
+    raysSided = interceptRaysSided,
+    
+    interceptRaysBiSided = interceptRaysBiSided,
+    raysBiSided = interceptRaysBiSided,
+    
+    makeLineNormal = makeLineNormal,
+    makeLineMidPosLenAng = makeLineMidPosLenAng,
+    
+    interceptLineWithRay = interceptLineWithRay,
+    lineRay = interceptLineWithRay,
+    
+    interceptLineWithRayForLerp = interceptLineWithRayForLerp,
+    lineRayL = interceptLineWithRayForLerp,
+    
+    interceptLineWithRayForBounce = interceptLineWithRayForBounce,
+    lineRayB = interceptLineWithRayForBounce,
+    
+    interceptLineWithRayForBounceLerpNormal = interceptLineWithRayForBounceLerpNormal,
+    lineRayBLN = interceptLineWithRayForBounceLerpNormal,
+    
+    interceptLines = interceptLines,
+    lines = interceptLines,
+    
+    interceptLinesForBounceLerpNormal = interceptLinesForBounceLerpNormal,
+    linesBLN = interceptLinesForBounceLerpNormal
+    
+}
