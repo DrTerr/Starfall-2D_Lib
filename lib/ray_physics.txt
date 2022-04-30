@@ -1,0 +1,226 @@
+--@name Ray Collision Resolver
+--@author
+--@shared
+--@include ./2d_lib/lib/2d_intercept0.2.txt
+
+local intercept = require("./2d_lib/lib/2d_intercept0.2.txt")
+local Vector = Vector
+
+--Inline here for extra performance gains
+local linesBLN = intercept.linesBLN
+local makeLineNormal = intercept.makeLineNormal
+--local dotCompToVec = intercept.dotCompToVec
+
+local function processProjectile(projPos,projFrom,projTo,lineFrom,lineTo,travelDist)
+    local intersection,bounce = linesBLN(lineFrom,lineTo,projFrom,projTo)
+    if intersection then
+        --print(intersection)
+        local colideDiff = (intersection-projPos)
+        local colideDist = (colideDiff):getLength2D()
+        --print(colideDot)
+        if colideDist > travelDist then
+            --print("wrong dist")
+            return
+        end
+        --render.drawLine(ballPos.x-ballDir.x,ballPos.y-ballDir.y,ballPos.x+ballDir.x*5,ballPos.y+ballDir.y*5)
+        --ballDir = bounce
+        --print(bounce)
+        --ballPos = intersection
+        return travelDist-colideDist,intersection,bounce
+    end
+end
+
+local function solveColissionIteration(projPos,projDir,projData,travelDist,walls)
+    --Variables for final colission within this iteration
+    local candidateDist = nil
+    local nextDir = nil
+    local nextPos = nil
+    local nextWall = nil
+    local index = nil
+    --Precalculate projectile line here
+    local projFrom = projPos - projDir
+    local projTo = projPos+projDir*travelDist
+    
+    for i,wall in ipairs(walls) do
+        local from,to,normal = wall[1],wall[2],wall[3]
+        --Wall diretionality rejection
+        if projDir:dot(normal) > 0 then
+            --render.drawLine(from.x,from.y,to.x,to.y)
+            --print("Rejected on normal")
+            continue
+        end
+        --Attempt to intersect
+        local leftOverDist,bouncePos,bounceDir = processProjectile(projPos,projFrom,projTo,from,to,travelDist)
+        if leftOverDist != nil then
+            if candidateDist == nil  then
+                candidateDist = leftOverDist
+                index = i
+                nextWall = wall
+                nextDir = bounceDir
+                nextPos = bouncePos
+            else
+                --contentionCount = contentionCount + 1
+                --print("Contention") 
+                if leftOverDist > candidateDist then
+                    candidateDist = leftOverDist
+                    index = i
+                    nextWall = wall
+                    nextDir = bounceDir
+                    nextPos = bouncePos
+                end
+            end
+            --return leftOverDist,i
+        end
+    end
+    if candidateDist != nil then
+        --print("Contention ",contentionCount,index)
+        local wallCallback = nextWall[4]
+        if wallCallback then
+            callbackPos,callbackDir,callbackDist = wallCallback(projData,nextPos,nextDir,candidateDist,projPos,projDir)
+            if callbackPos then
+                nextPos = callbackPos
+            end
+            if callbackDir then
+                nextDir = callbackDir
+            end
+            if callbackDist != nil then
+                candidateDist = callbackDist
+            end
+        end
+        projDir:normalize()
+    end
+    return candidateDist,index,nextPos,nextDir
+end
+
+local function solveColissions(projPos,projDir,projData,travelDist,walls)
+    --Repeat either 10 times or till no more colissions to be resolved
+    for attempt=1,10 do
+        local leftOverDist,i,nextPos,nextDir = solveColissionIteration(projPos,projDir,projData,travelDist,walls)
+        if leftOverDist != nil then
+            --print("pong",attempt)
+            travelDist = leftOverDist
+            projPos = nextPos
+            projDir = nextDir
+            --local leftOver = #pendingWalls
+            --print(pendingWalls[leftOver])
+            --pendingWalls[i] = pendingWalls[leftOver]
+            --pendingWalls[leftOver]=nil
+            --pendingWalls[i]=nil
+        else
+            return travelDist,projPos,projDir
+        end
+    end
+    --print("Given up")
+    return 0,projPos,projDir
+end
+
+local function solveProjectile(projPos,projDir,projData,travelDist,walls)
+    local leftOverDist,nextPos,nextDir = solveColissions(projPos,projDir,projData,travelDist,walls)
+    
+    if leftOverDist > 0 then
+        nextPos = nextPos + nextDir * leftOverDist
+    end
+    return nextPos,nextDir
+end
+
+local function sceneBuilder()
+    local walls = {}
+     
+    local function addWall(from,to,callback)
+        local normal = makeLineNormal(from,to)
+        local index = #walls+1
+        walls[index]={from,to,normal,callback}
+        return index
+    end
+    
+    local function adjust(index,from,to)
+        local wall = walls[index]
+        wall[1]=from
+        wall[2]=to
+    end
+    
+    local function addAdjustable(from,to,callback)
+        local normal = makeLineNormal(from,to)
+        local index = #walls+1
+        local wall = {from,to,normal,callback}
+        walls[index]=wall
+        local function adjust(from,to)
+            wall[1]=from
+            wall[2]=to
+        end
+        return adjust,index
+    end
+    
+    return {
+        walls = walls,
+        addWall = addWall,
+        adjust = adjust,
+        addAdjustable = addAdjustable 
+    }
+end
+
+local function allocateProjectile(pos,dir,speed,data,projectileStore)
+    local proj = {pos=pos,dir=dir:getNormalized(),speed=speed,data=data}
+    if projectileStore then
+    projectileStore[#projectileStore+1] = proj
+    end
+    local function adjust(pos,dir,speed)
+        if pos != nil then
+            proj.pos = pos
+        end
+        if dir != nil then
+            proj.dir = dir:getNormalized()
+        end
+        if speed != nil then
+            proj.speed = speed
+        end
+    end
+    
+    return proj,adjust
+end
+
+local function initScene(walls,projectiles)
+    
+    local function tick(delta)
+        for i,proj in ipairs(projectiles) do
+            local pos,dir,speed = proj.pos,proj.dir,proj.speed
+            local nextPos,nextDir = solveProjectile(pos,dir,speed*delta,walls)
+            proj.pos = nextPos
+            proj.dir = nextDir
+        end
+    end
+    
+    return tick
+end
+
+local function initProjScene(walls,proj)
+    local function tick(delta)
+        local pos,dir,speed,data = proj.pos,proj.dir,proj.speed,proj.data
+        --print(pos,dir)
+        local nextPos,nextDir = solveProjectile(pos,dir,data,speed*delta,walls)
+        proj.pos = nextPos
+        proj.dir = nextDir
+    end
+    
+    return tick
+end
+
+local function drawGeometry(walls)
+        render.setColor(Color(255,0,0))
+    for i,wall in pairs(walls) do
+            local from = wall[1]
+            local to = wall[2]
+            local normal = wall[3]
+            render.drawLine(from.x,from.y,to.x,to.y)
+            local midPos = (from+to)/2
+            render.drawLine(midPos.x,midPos.y,midPos.x+normal.x*5,midPos.y+normal.y*5)
+    end
+end
+
+return {
+    sceneBuilder = sceneBuilder,
+    allocateProj = allocateProjectile,
+    initScene = initScene,
+    initProjScene = initProjScene,
+    drawGeometry = drawGeometry
+}

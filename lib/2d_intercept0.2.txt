@@ -8,7 +8,7 @@
     Dot Product - A scalar value representing how parallel vectors/directions are generally 
 goes from -1 to 1, 0 being perpendicular and 1 or -1 being perfectly parallel -1 being in the opposite direction. 
 Value is much higher if provided vectors aren't normalized, but will result in 0 if both lines are still perpendicular.
-	Lerp - Linear Interpolation, generally refers to positioning point between 2 vectors using a ratio position value from 0 to 1
+    Lerp - Linear Interpolation, generally refers to positioning point between 2 vectors using a ratio position value from 0 to 1
 In this library, some functions return what the lerp value would be on the line and refer to that value as lerp.
 ]]
 
@@ -16,6 +16,7 @@ In this library, some functions return what the lerp value would be on the line 
 local min = math.min
 local max = math.max
 local sqrt = math.sqrt
+local Vector = Vector
 
 --Calculates a dot product quickly
 local function dotFast(aX,aY,bX,bY)
@@ -46,6 +47,22 @@ end
 local function reflectAccurrateVec(dir,normal)
     local refX,refY = reflectAccurate(dir.x,dir.y,normal.x,normal.y)
     return Vector(refX,refY)
+end
+
+local function pointInArea(x,y,minX,minY,maxX,maxY)
+    if maxX >= x and minX <= x and maxY >= y and minY <= y then
+        return true
+    end
+end
+
+local function resolvePointInArea(minX,minY,maxX,maxY)
+    return function(x,y)
+        return pointInArea(x,y,minX,minY,maxX,maxY)
+    end
+end
+
+local function resolvePointInBox(boxX,boxY,width,height)
+    return resolvePointInArea(boxX,boxY,boxX+width,boxY+height)
 end
 
 --Uses Elimination Method for finding intersection
@@ -404,14 +421,14 @@ local function interceptLinesForBounceLerpNormal(lineFrom,lineTo,tracerFrom,trac
         local lineMaxX = max(lineFromX,lineToX)
         local lineMaxY = max(lineFromY,lineToY)
         
-        if lineMinX <= x and lineMaxX >= x and lineMinY <= y and lineMaxY >= y then
+        if ((lineMinX <= x and lineMaxX >= x) or ((lineMaxX-lineMinX) == 0)) and ((lineMinY <= y and lineMaxY >= y) or ((lineMaxY-lineMinY) == 0)) then
             local traceMinX = min(tracerFromX,tracerToX)
             local traceMinY = min(tracerFromY,tracerToY)
             
             local traceMaxX = max(tracerFromX,tracerToX)
             local traceMaxY = max(tracerFromY,tracerToY)
             
-            if traceMinX <= x and traceMaxX >= x and traceMinY <= y and traceMaxY >= y then
+            if ((traceMinX <= x and traceMaxX >= x) or ((traceMaxX-traceMinX) == 0)) and ((traceMinY <= y and traceMaxY >= y) or ((traceMaxY-traceMinY) == 0)) then
                 
                 local lineDiffX = lineFromX-lineToX
                 local lineDiffY = lineFromY-lineToY
@@ -470,6 +487,8 @@ return {
     reflectVec = reflectVec,
     intercept = intercept,
     
+    interceptRaysComponents = interceptRaysComponents,
+    
     interceptRays = interceptRays,
     rays = interceptRays,
     
@@ -498,6 +517,9 @@ return {
     lines = interceptLines,
     
     interceptLinesForBounceLerpNormal = interceptLinesForBounceLerpNormal,
-    linesBLN = interceptLinesForBounceLerpNormal
-    
+    linesBLN = interceptLinesForBounceLerpNormal,
+  
+    pointInArea = pointInArea,
+    resolvePointInArea = resolvePointInArea,
+    resolvePointInBox = resolvePointInBox   
 }
